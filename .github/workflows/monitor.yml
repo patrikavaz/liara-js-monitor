@@ -2,8 +2,8 @@ name: Monitor Liara.ir JS Changes
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
+    - cron: '*/30 * * * *'  # هر 30 دقیقه
+  workflow_dispatch:       # اجرای دستی
 
 jobs:
   monitor:
@@ -12,33 +12,42 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Create folders
-        run: mkdir -p chunks/pages chunks/webpack
+      - name: Create chunks folder
+        run: mkdir -p chunks
 
-      - name: Download build manifest (لیست همه JSها)
+      - name: Get current buildId
+        id: build
         run: |
-          curl -s https://liara.ir/_next/static/$(curl -s https://liara.ir | grep -o '"buildId":"[^"]*"' | cut -d'"' -f4)/buildManifest.js > buildManifest.js
+          BUILD_ID=$(curl -s https://liara.ir/_next/static/uYRRPmLwT2JSAONXJU0Yq/_buildManifest.js | grep -o '"buildId":"[^"]*"' | head -1 | cut -d'"' -f4)
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "Current buildId: $BUILD_ID"
 
-      - name: Extract ALL JS paths from manifest
+      - name: Download _buildManifest.js
         run: |
-          grep -o '/_next/static/[^"]*\.js' buildManifest.js | sort -u > js-list.txt
+          curl -f -L "https://liara.ir/_next/static/${{ steps.build.outputs.build_id }}/_buildManifest.js" -o chunks/_buildManifest.js
 
-      - name: Download every JS file
+      - name: Extract all JS file paths
         run: |
-          cat js-list.txt | while read path; do
+          grep -o '/_next/static/[^"]*\.js' chunks/_buildManifest.js | sort -u > js_paths.txt
+
+      - name: Download all JS files
+        run: |
+          cat js_paths.txt | while read path; do
             url="https://liara.ir$path"
-            file="./chunks${path#_next/static}"
+            file="chunks${path#_next/static}"
             mkdir -p "$(dirname "$file")"
-            echo "↓ $url"
-            curl -f -L --create-dirs "$url" -o "$file" || echo "✘ Failed: $url"
+            echo "Downloading $url → $file"
+            curl -f -L "$url" -o "$file" || echo "Failed: $url"
           done
 
-      - name: Beautify JS (خوانا کن!)
+      - name: Beautify all JS files (make readable)
         run: |
-          npx js-beautify@latest -r "chunks/**/*.js" || true
+          npm install -g js-beautify
+          find chunks -name "*.js" -exec js-beautify -r {} \;
 
-      - name: Commit فقط اگر تغییر کرد
+      - name: Commit changes if any
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Liara.ir JS updated $(date)"
+          commit_message: "Liara.ir JS updated (build: ${{ steps.build.outputs.build_id }})"
           file_pattern: chunks
+          skip_dirty_check: false
